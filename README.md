@@ -42,7 +42,20 @@ which assigns the groups.
 wrong group first, or failing to drive any ball to a rail. Potting the 8-ball
 early — or scratching on it — loses the game.
 
-It's two-player hot-seat on a single screen.
+## Opponents
+
+Play against the **computer** (default) or a second person hot-seat on the same
+screen — toggle with the **vs Computer / 2 Player** button. The computer's
+skill is set with the **AI: Easy / Medium / Hard** button, which controls how
+much its aim can stray.
+
+The AI (`js/ai.js`) plans with the *ghost-ball* method: for every legal ball
+and pocket it computes where the cue must strike, scores the cut angle and
+checks that both the cue's path and the object ball's path to the pocket are
+clear, then plays the best pot it finds (or a safe contact shot if none). With
+ball in hand it searches placements for an easy straight-in. It's a pure module
+with no DOM/render dependencies, so it's unit-tested directly against the
+physics engine.
 
 ## Project layout
 
@@ -50,8 +63,9 @@ It's two-player hot-seat on a single screen.
 index.html        Page shell, import map, HUD
 styles.css        UI styling
 js/physics.js     Headless billiards physics engine (no rendering deps)
+js/ai.js          Headless shot-planning AI (no rendering deps)
 js/scene.js       Three.js scene: table, balls, cue, camera, lighting
-js/main.js        Game loop, input, and the 8-ball rules engine
+js/main.js        Game loop, input, AI turn controller, and 8-ball rules
 vendor/three/     Vendored Three.js (module build + OrbitControls)
 ```
 
@@ -60,6 +74,6 @@ so it can be unit-tested directly under Node.
 
 ## Notes / ideas for later
 
-- AI opponent for single-player.
 - A true carom (three-cushion, pocketless) mode, closer to the original game.
+- Smarter AI: position play (planning the next shot) and safety strategy.
 - Number decals and reflections on the balls; sound effects.

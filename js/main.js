@@ -4,6 +4,7 @@
 
 import { World, Ball, TABLE } from './physics.js';
 import { Scene3D, ballGroup } from './scene.js';
+import { planShot } from './ai.js';
 
 const { HX, HZ, R } = TABLE;
 
@@ -17,7 +18,7 @@ const world = new World();
 const game = {
   phase: 'aiming',          // 'aiming' | 'shooting' | 'gameover'
   current: 0,               // player index 0 or 1
-  players: [{ group: null }, { group: null }],
+  players: [{ group: null, ai: false }, { group: null, ai: true }],
   open: true,               // table open (groups unassigned)
   isBreak: true,
   ballInHand: false,
@@ -26,10 +27,21 @@ const game = {
   power: 0,
   charging: false,
   chargeStart: 0,
+  mode: 'ai',               // 'ai' (vs computer) | 'pvp' (two players)
+  difficulty: 'Medium',
+  ai: { state: 'idle', shot: null, until: 0, chargeStart: 0 },
 };
 
 const MAX_POWER = 6.0;       // m/s at full charge
 const CHARGE_TIME = 1100;    // ms to reach full power
+
+// How wildly the computer's aim can stray, per difficulty (radians).
+const DIFFICULTY = { Easy: 0.05, Medium: 0.022, Hard: 0.008 };
+
+// Pacing for the computer's turn animation.
+const AI_THINK_MS = 750, AI_AIM_MS = 600, AI_CHARGE_MS = 450;
+
+function currentIsAI() { return !!game.players[game.current].ai; }
 
 function rackBalls() {
   world.balls.length = 0;
@@ -112,7 +124,7 @@ canvas.addEventListener('pointermove', e => {
   pointerNDC.x = (e.clientX / window.innerWidth) * 2 - 1;
   pointerNDC.y = -(e.clientY / window.innerHeight) * 2 + 1;
 
-  if (game.phase !== 'aiming') return;
+  if (game.phase !== 'aiming' || currentIsAI()) return;
   const pt = view.pickTable(pointerNDC.x, pointerNDC.y);
   if (!pt) return;
   const cue = world.cue();
@@ -132,7 +144,7 @@ canvas.addEventListener('pointermove', e => {
 
 canvas.addEventListener('pointerdown', e => {
   if (e.button !== 0) return;             // left button only; right = orbit
-  if (game.phase !== 'aiming') return;
+  if (game.phase !== 'aiming' || currentIsAI()) return;
 
   if (game.ballInHand) {
     const cue = world.cue();
@@ -274,7 +286,7 @@ function resolveShot() {
   if (eightPotted) {
     if (!game.preGroupCleared) { gameOver(opp, 'Potted the 8-ball too early!'); return; }
     if (ev.cueScratch) { gameOver(opp, 'Scratched while potting the 8-ball.'); return; }
-    gameOver(me, `Player ${me + 1} sinks the 8-ball — game!`); return;
+    gameOver(me, `${playerName(me)} sink${me === 0 && game.mode === 'ai' ? '' : 's'} the 8-ball — game!`); return;
   }
 
   // --- Foul checks. ---
@@ -306,7 +318,7 @@ function resolveShot() {
       game.players[me].group = g;
       game.players[opp].group = g === 'solid' ? 'stripe' : 'solid';
       game.open = false;
-      flash(`Player ${me + 1} is ${g.toUpperCase()}.`);
+      flash(`${playerName(me)} ${me === 0 && game.mode === 'ai' ? 'are' : 'is'} ${g.toUpperCase()}.`);
     }
   }
 
@@ -327,7 +339,7 @@ function endTurnContinue() {
 function endTurnPass() {
   game.current = 1 - game.current;
   game.phase = 'aiming';
-  flash(`Player ${game.current + 1}'s turn.`, 1600);
+  flash(`${playerName(game.current)}'s turn.`, 1600);
   startAim();
 }
 function foul(msg) {
@@ -360,12 +372,72 @@ function respotBall(id) {
 }
 
 function startAim() {
-  game.ballInHand = game.ballInHand; // keep flag
   game.power = 0;
   updatePowerBar();
   updateScoreboard();
-  // Default aim toward table center if cue exists.
   updateAimVisuals();
+  maybeStartAI();
+}
+
+// ---------------------------------------------------------------------------
+// Computer opponent
+// ---------------------------------------------------------------------------
+function maybeStartAI() {
+  if (game.phase !== 'aiming' || !currentIsAI()) return;
+  startAITurn();
+}
+
+function startAITurn() {
+  const ctx = {
+    group: game.players[game.current].group,
+    cleared: isGroupCleared(game.current),
+    open: game.open,
+    isBreak: game.isBreak,
+    ballInHand: game.ballInHand,
+    maxPower: MAX_POWER,
+    error: DIFFICULTY[game.difficulty],
+  };
+  const shot = planShot(world, ctx);
+
+  // Place the cue ball if the computer has ball in hand.
+  if (game.ballInHand && shot.place) {
+    const cue = world.cue();
+    cue.x = shot.place.x; cue.z = shot.place.z;
+    cue.vx = cue.vz = cue.wx = cue.wy = cue.wz = 0;
+    game.ballInHand = false;
+    view.sync(world);
+  }
+
+  game.ai.shot = shot;
+  game.ai.state = 'think';
+  game.ai.until = performance.now() + AI_THINK_MS;
+  flash('🤖 Computer is thinking…', AI_THINK_MS);
+}
+
+// Advance the computer's turn animation: think → settle aim → charge → strike.
+function stepAI(now) {
+  const ai = game.ai;
+  if (ai.state === 'think') {
+    if (now >= ai.until) {
+      game.aimDir = ai.shot.dir;
+      game.spin = ai.shot.spin;
+      drawSpin();
+      ai.state = 'aim';
+      ai.until = now + AI_AIM_MS;
+    }
+  } else if (ai.state === 'aim') {
+    if (now >= ai.until) { ai.state = 'charge'; ai.chargeStart = now; }
+  } else if (ai.state === 'charge') {
+    const f = Math.min(1, (now - ai.chargeStart) / AI_CHARGE_MS);
+    game.power = ai.shot.power * f;
+    updatePowerBar();
+    if (f >= 1) {
+      ai.state = 'idle';
+      shoot();
+      game.power = 0;
+      updatePowerBar();
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -381,7 +453,9 @@ function loop(now) {
     view.sync(world);
     if (!world.anyMoving()) resolveShot();
   } else if (game.phase === 'aiming') {
-    if (game.charging) {
+    if (currentIsAI()) {
+      stepAI(now);
+    } else if (game.charging) {
       const held = now - game.chargeStart;
       game.power = Math.min(MAX_POWER, (held / CHARGE_TIME) * MAX_POWER);
       updatePowerBar();
@@ -402,21 +476,58 @@ document.getElementById('help-btn').addEventListener('click', () =>
 document.getElementById('help-close').addEventListener('click', () =>
   document.getElementById('help').classList.add('hidden'));
 
+const modeBtn = document.getElementById('mode');
+const diffBtn = document.getElementById('difficulty');
+modeBtn.addEventListener('click', () => {
+  game.mode = game.mode === 'ai' ? 'pvp' : 'ai';
+  modeBtn.textContent = game.mode === 'ai' ? 'vs Computer' : '2 Player';
+  diffBtn.style.display = game.mode === 'ai' ? '' : 'none';
+  newGame();
+});
+diffBtn.addEventListener('click', () => {
+  const order = ['Easy', 'Medium', 'Hard'];
+  game.difficulty = order[(order.indexOf(game.difficulty) + 1) % order.length];
+  diffBtn.textContent = `AI: ${game.difficulty}`;
+});
+
+function playerName(i) {
+  if (game.mode === 'ai') return i === 0 ? 'You' : 'Computer';
+  return `Player ${i + 1}`;
+}
+function updateNames() {
+  for (let i = 0; i < 2; i++) {
+    const el = document.querySelector(`#p${i} .pname`);
+    if (el) el.textContent = playerName(i);
+  }
+}
+
 function newGame() {
   game.phase = 'aiming';
   game.current = 0;
-  game.players = [{ group: null }, { group: null }];
+  game.players = [
+    { group: null, ai: false },
+    { group: null, ai: game.mode === 'ai' },
+  ];
   game.open = true;
   game.isBreak = true;
   game.ballInHand = false;
   game.spin = { x: 0, y: 0 };
   game.power = 0;
+  game.ai = { state: 'idle', shot: null, until: 0, chargeStart: 0 };
   rackBalls();
   drawSpin();
   updatePowerBar();
+  updateNames();
   updateScoreboard();
-  flash('Player 1 to break. Hold left mouse to power up!', 3000);
+  const who = game.mode === 'ai' ? 'You break' : 'Player 1 to break';
+  flash(`${who}. Hold left mouse to power up!`, 3000);
 }
 
 newGame();
 requestAnimationFrame(loop);
+
+// Optional debug hook (append ?debug=1 to the URL) for inspecting state and
+// scripting tests from the console.
+if (new URLSearchParams(location.search).get('debug')) {
+  window.carom = { game, world, view, Ball, TABLE, startAim };
+}
