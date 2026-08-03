@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Carom — 3D Pool</title>
+  <link rel="stylesheet" href="styles.css" />
+  <!-- Three.js vendored locally so the game runs fully offline. -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./vendor/three/three.module.js",
+      "three/addons/": "./vendor/three/addons/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- Scoreboard -->
+  <div id="scoreboard">
+    <div class="player" id="p0">
+      <div class="pname">Player 1</div>
+      <div class="pgroup" id="g0">—</div>
+    </div>
+    <div class="vs">vs</div>
+    <div class="player" id="p1">
+      <div class="pname">Player 2</div>
+      <div class="pgroup" id="g1">—</div>
+    </div>
+  </div>
+
+  <div id="banner"></div>
+
+  <!-- Bottom control bar -->
+  <div id="hud">
+    <div id="spin-wrap">
+      <div class="label">Spin</div>
+      <canvas id="spin" width="90" height="90"></canvas>
+    </div>
+
+    <div id="power-wrap">
+      <div class="label">Power</div>
+      <div id="power-bar"><div id="power-fill"></div></div>
+      <div class="hint">Hold <b>left mouse</b> on the table to charge, release to shoot</div>
+    </div>
+
+    <div id="buttons">
+      <button id="mode">vs Computer</button>
+      <button id="difficulty">AI: Medium</button>
+      <button id="newgame">New Game</button>
+      <button id="help-btn">Help</button>
+    </div>
+  </div>
+
+  <!-- Help overlay -->
+  <div id="help" class="hidden">
+    <div class="help-box">
+      <h2>Carom — 3D Pool</h2>
+      <p>A 3D 8-ball pool game. Pocket all of your group (solids or stripes),
+         then sink the 8-ball to win.</p>
+      <ul>
+        <li><b>Aim:</b> move the mouse over the table — the cue follows.</li>
+        <li><b>Shoot:</b> hold <b>left mouse button</b> to charge power, release to strike.</li>
+        <li><b>Spin (english):</b> click inside the spin circle to set tip offset.</li>
+        <li><b>Rotate camera:</b> drag with the <b>right mouse button</b>.</li>
+        <li><b>Zoom:</b> mouse wheel.</li>
+        <li><b>Ball in hand:</b> after a foul, click an open spot to place the cue ball.</li>
+      </ul>
+      <p class="rules">Scratch (potting the cue ball), hitting the wrong group
+        first, or driving no ball to a rail is a foul — your opponent gets ball
+        in hand. Pocket the 8 too early, or scratch on the 8, and you lose.</p>
+      <p class="rules">Use <b>vs Computer / 2 Player</b> to choose your opponent,
+        and <b>AI: Easy / Medium / Hard</b> to set the computer's skill.</p>
+      <button id="help-close">Got it</button>
+    </div>
+  </div>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>
