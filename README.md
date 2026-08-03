@@ -22,6 +22,24 @@ npm start
 
 Then open <http://localhost:8080> in a modern browser.
 
+## Deploy
+
+It's a fully static site with no build step, so it drops onto any static host.
+`vercel.json` is included, which pins the "no build, serve the repo root" setup
+and sets long-lived cache headers for the vendored Three.js.
+
+```bash
+# Vercel CLI — from the repo root
+npx vercel        # preview deploy
+npx vercel --prod # production
+```
+
+Or import the repo at [vercel.com/new](https://vercel.com/new) and accept the
+defaults — Framework Preset **Other**, no build command, output directory `.`.
+
+The same folder works unchanged on GitHub Pages, Netlify, Cloudflare Pages, or
+any plain HTTP server.
+
 ## How to play
 
 It's standard **8-ball**:
