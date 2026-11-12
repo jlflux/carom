@@ -44,14 +44,20 @@ any plain HTTP server.
 
 It's standard **8-ball**:
 
-- **Aim:** move the mouse over the table — the cue stick tracks your pointer.
-- **Shoot:** **click** to lock your aim, then **pull the mouse back** along the
-  cue to set power. Release to strike if you're dragging, or click again if you
-  let go. Clicking without a pull, right-clicking or **Esc** cancels the shot.
-- **Spin (english):** click inside the spin circle (bottom-left) to set where the
-  cue tip strikes the ball — top/bottom for follow/draw, sides for english.
-- **Rotate the camera:** drag with the **right mouse button**.
-- **Zoom:** mouse wheel.
+- **Aim:** click the table once to take the cue. The camera sits behind the
+  cue with the cue ball in the center of the screen, and moving the mouse left
+  or right swings your aim (and the camera) round the cue ball. Hold **Shift**
+  for fine aiming.
+- **View:** move the mouse forward or back to lower or raise the camera; the
+  mouse wheel zooms.
+- **Shoot:** **click** to lock your aim, then **pull the mouse back** to set
+  power. Release to strike if you're holding the button, or click again if you
+  let go. Clicking without a pull, or right-clicking, cancels the shot.
+- **Spin (english):** arrow keys, or click inside the spin circle (bottom-left),
+  set where the cue tip strikes the ball — top/bottom for follow/draw, sides
+  for english.
+- **Free the cursor:** **Esc** releases the mouse so you can use the buttons;
+  click the table to take the cue again.
 - **Ball in hand:** after a foul, click an open spot to place the cue ball.
 
 Pocket all of your group (**solids** 1–7 or **stripes** 9–15), then sink the
@@ -84,9 +90,9 @@ index.html        Page shell, import map, HUD
 styles.css        UI styling
 js/physics.js     Headless billiards physics engine (no rendering deps)
 js/ai.js          Headless shot-planning AI (no rendering deps)
-js/scene.js       Three.js scene: table, balls, cue, camera, lighting
+js/scene.js       Three.js scene: table, balls, cue, camera rig, lighting
 js/main.js        Game loop, input, AI turn controller, and 8-ball rules
-vendor/three/     Vendored Three.js (module build + OrbitControls)
+vendor/three/     Vendored Three.js (module build)
 ```
 
 The physics engine in `js/physics.js` has no dependency on Three.js or the DOM,

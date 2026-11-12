@@ -142,7 +142,20 @@ export class World {
     const uz = b.vz - R * b.wx;
     const uSpeed = Math.hypot(ux, uz);
 
-    if (uSpeed > 1e-4) {
+    // Friction slows the ball and spins it up at the same time, so the slip
+    // shrinks 3.5x faster than the ball decelerates (1 + 5/2 for a sphere).
+    const slipRate = 3.5 * MU_SLIDE * G;
+
+    if (uSpeed > 1e-4 && uSpeed <= slipRate * dt) {
+      // Sliding that ends within this step. Apply exactly the friction needed
+      // to reach a pure roll and no more: a full step of friction here would
+      // overshoot, and that overshoot adds energy (balls resting against each
+      // other would slowly speed up instead of stopping).
+      b.vx -= ux / 3.5;
+      b.vz -= uz / 3.5;
+      b.wz = -b.vx / R;
+      b.wx = b.vz / R;
+    } else if (uSpeed > 1e-4) {
       // Sliding: kinetic friction opposes the contact-point slip.
       const ax = -MU_SLIDE * G * (ux / uSpeed);
       const az = -MU_SLIDE * G * (uz / uSpeed);
@@ -152,15 +165,6 @@ export class World {
       const c = (5 / (2 * R));
       b.wx += c * (-az) * dt;
       b.wz += c * (ax) * dt;
-      // If this step overshot the rolling point, the contact slip would
-      // reverse — discrete jitter that never settles. Snap to a pure roll
-      // (u = 0) so rolling resistance can then bring the ball to rest.
-      const ux2 = b.vx + R * b.wz;
-      const uz2 = b.vz - R * b.wx;
-      if (ux2 * ux + uz2 * uz < 0) {
-        b.wz = -b.vx / R;
-        b.wx = b.vz / R;
-      }
     } else {
       // Rolling: light rolling resistance, keep spin consistent with motion.
       const sp = b.speed();
@@ -274,8 +278,11 @@ export class World {
   handlePockets() {
     for (const b of this.balls) {
       if (!b.active) continue;
+      // A ball can only get past the edge of the cloth through a pocket's
+      // jaws, so one that has is down even if it clipped the mouth off-center.
+      const offTable = Math.abs(b.x) > TABLE.HX || Math.abs(b.z) > TABLE.HZ;
       for (const p of POCKETS) {
-        if (Math.hypot(b.x - p.x, b.z - p.z) < TABLE.POCKET_R) {
+        if (offTable || Math.hypot(b.x - p.x, b.z - p.z) < TABLE.POCKET_R) {
           b.active = false;
           b.vx = b.vz = b.wx = b.wy = b.wz = 0;
           this.events.pocketed.push(b.id);

@@ -4,10 +4,14 @@
 // from the physics World and draws it.
 
 import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TABLE, POCKETS } from './physics.js';
 
 const { HX, HZ, R } = TABLE;
+
+// The default whole-table view. A camera pose is a point on the table to look
+// at, the compass direction the camera faces (yaw, measured like atan2(z, x)),
+// how steeply it looks down (pitch) and how far back it sits (dist).
+export const OVERVIEW = { yaw: -Math.PI / 2, pitch: 0.73, dist: 2.55 };
 
 // Number-ball colors (standard pool set). 9-15 reuse 1-7 as stripes.
 export const BALL_COLORS = {
@@ -42,21 +46,13 @@ export class Scene3D {
     this.scene.background = new THREE.Color(0x0b0d12);
 
     this.camera = new THREE.PerspectiveCamera(50, 1, 0.05, 100);
-    this.camera.position.set(0, 1.7, 1.9);
 
-    this.controls = new OrbitControls(this.camera, canvas);
-    this.controls.target.set(0, 0, 0);
-    this.controls.enableDamping = true;
-    this.controls.dampingFactor = 0.08;
-    this.controls.minDistance = 0.8;
-    this.controls.maxDistance = 5;
-    this.controls.maxPolarAngle = Math.PI / 2.05; // don't go under the table
-    // Free up the left mouse button for aiming/shooting; orbit on right-drag.
-    this.controls.mouseButtons = {
-      LEFT: null,
-      MIDDLE: THREE.MOUSE.DOLLY,
-      RIGHT: THREE.MOUSE.ROTATE,
-    };
+    // Camera rig: `cur` is where the camera is, `goal` is where the game wants
+    // it. The camera glides toward the goal; when asked to `follow`, it locks
+    // on once it arrives so aiming has no lag.
+    const start = { tx: 0, tz: 0, ...OVERVIEW };
+    this.rig = { cur: { ...start }, goal: { ...start }, follow: false, locked: false };
+    this._applyCamera();
 
     this.ballMeshes = new Map(); // id -> THREE.Group
 
@@ -268,13 +264,54 @@ export class Scene3D {
     this.cue.rotateX(-Math.PI / 2 + 0.07);
   }
 
-  // Project a point on the table to screen pixels.
-  toScreen(x, z) {
-    const v = new THREE.Vector3(x, R, z).project(this.camera);
-    return {
-      x: (v.x + 1) / 2 * window.innerWidth,
-      y: (1 - v.y) / 2 * window.innerHeight,
-    };
+  // Tell the camera where it should be. With `follow`, it glides there once
+  // and then tracks the goal exactly (used while the player is aiming).
+  setCameraGoal(tx, tz, yaw, pitch, dist, follow) {
+    const g = this.rig.goal;
+    g.tx = tx; g.tz = tz; g.yaw = yaw; g.pitch = pitch; g.dist = dist;
+    if (!follow) this.rig.locked = false;
+    this.rig.follow = follow;
+  }
+
+  // Leave the camera where it is heading and stop tracking.
+  holdCamera() {
+    this.rig.follow = false;
+    this.rig.locked = false;
+  }
+
+  updateCamera(dt) {
+    const { cur, goal } = this.rig;
+    // Shortest way round for the heading.
+    let dyaw = goal.yaw - cur.yaw;
+    dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+
+    if (this.rig.locked) {
+      cur.tx = goal.tx; cur.tz = goal.tz; cur.yaw = goal.yaw;
+      cur.pitch = goal.pitch; cur.dist = goal.dist;
+    } else {
+      const k = 1 - Math.exp(-dt * 7);
+      cur.tx += (goal.tx - cur.tx) * k;
+      cur.tz += (goal.tz - cur.tz) * k;
+      cur.yaw += dyaw * k;
+      cur.pitch += (goal.pitch - cur.pitch) * k;
+      cur.dist += (goal.dist - cur.dist) * k;
+      const settled = Math.hypot(goal.tx - cur.tx, goal.tz - cur.tz) < 0.004 &&
+        Math.abs(dyaw) < 0.004 && Math.abs(goal.pitch - cur.pitch) < 0.004 &&
+        Math.abs(goal.dist - cur.dist) < 0.004;
+      if (settled && this.rig.follow) this.rig.locked = true;
+    }
+    this._applyCamera();
+  }
+
+  _applyCamera() {
+    const c = this.rig.cur;
+    const flat = Math.cos(c.pitch) * c.dist;
+    this.camera.position.set(
+      c.tx - Math.cos(c.yaw) * flat,
+      R + Math.sin(c.pitch) * c.dist,
+      c.tz - Math.sin(c.yaw) * flat
+    );
+    this.camera.lookAt(c.tx, R, c.tz);
   }
 
   sync(world) {
@@ -303,8 +340,8 @@ export class Scene3D {
     return null;
   }
 
-  render() {
-    this.controls.update();
+  render(dt = 0) {
+    this.updateCamera(dt);
     this.renderer.render(this.scene, this.camera);
   }
 }
