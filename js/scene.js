@@ -206,7 +206,8 @@ export class Scene3D {
 
   _buildCue() {
     const len = 1.45;
-    const geo = new THREE.CylinderGeometry(0.006, 0.012, len, 16);
+    // Local +Y runs from the tip (y = 0, thin) to the butt (y = len, thick).
+    const geo = new THREE.CylinderGeometry(0.014, 0.006, len, 16);
     geo.translate(0, len / 2, 0);
     const mat = new THREE.MeshStandardMaterial({ color: 0xb5853f, roughness: 0.4 });
     this.cue = new THREE.Mesh(geo, mat);
@@ -259,10 +260,21 @@ export class Scene3D {
     if (!visible) return;
     const back = 0.02 + pull;
     this.cue.position.set(cue.x - dir.x * back, R, cue.z - dir.z * back);
-    // Aim the stick down its +Y axis toward the ball.
+    // lookAt points local +Z at the ball; rotating -90deg about X then swings
+    // the stick's length (+Y) to trail away behind it. The small extra angle
+    // lifts the butt slightly, the way a cue is actually held.
     const target = new THREE.Vector3(cue.x, R, cue.z);
     this.cue.lookAt(target);
-    this.cue.rotateX(Math.PI / 2);
+    this.cue.rotateX(-Math.PI / 2 + 0.07);
+  }
+
+  // Project a point on the table to screen pixels.
+  toScreen(x, z) {
+    const v = new THREE.Vector3(x, R, z).project(this.camera);
+    return {
+      x: (v.x + 1) / 2 * window.innerWidth,
+      y: (1 - v.y) / 2 * window.innerHeight,
+    };
   }
 
   sync(world) {

@@ -45,7 +45,9 @@ any plain HTTP server.
 It's standard **8-ball**:
 
 - **Aim:** move the mouse over the table — the cue stick tracks your pointer.
-- **Shoot:** hold the **left mouse button** to charge power, release to strike.
+- **Shoot:** **click** to lock your aim, then **pull the mouse back** along the
+  cue to set power. Release to strike if you're dragging, or click again if you
+  let go. Clicking without a pull, right-clicking or **Esc** cancels the shot.
 - **Spin (english):** click inside the spin circle (bottom-left) to set where the
   cue tip strikes the ball — top/bottom for follow/draw, sides for english.
 - **Rotate the camera:** drag with the **right mouse button**.
