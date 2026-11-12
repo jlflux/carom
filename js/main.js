@@ -25,15 +25,22 @@ const game = {
   aimDir: { x: 1, z: 0 },
   spin: { x: 0, y: 0 },     // english tip offset, within unit circle
   power: 0,
-  charging: false,
-  chargeStart: 0,
-  mode: 'ai',               // 'ai' (vs computer) | 'pvp' (two players)
+  pulling: false,           // aim is locked and the mouse is setting power
+  pullHeld: false,          // the button that started the pull is still down
+  pullStart: { x: 0, y: 0 },// screen position where the pull began
+  pullDir: { x: 0, y: 1 },  // screen direction that counts as "pulling back"
+  mode: 'ai',              // 'ai' (vs computer) | 'pvp' (two players)
   difficulty: 'Medium',
   ai: { state: 'idle', shot: null, until: 0, chargeStart: 0 },
 };
 
-const MAX_POWER = 6.0;       // m/s at full charge
-const CHARGE_TIME = 1100;    // ms to reach full power
+const MAX_POWER = 6.0;       // m/s at a full pull
+const MIN_POWER = 0.2;       // pulls weaker than this don't count as a shot
+
+// How far (in screen pixels) the mouse must be pulled back for full power.
+function pullRange() {
+  return Math.max(120, Math.min(260, window.innerHeight * 0.3));
+}
 
 // How wildly the computer's aim can stray, per difficulty (radians).
 const DIFFICULTY = { Easy: 0.05, Medium: 0.022, Hard: 0.008 };
@@ -109,7 +116,7 @@ function updateAimVisuals() {
   if (!cue || !cue.active) { view.setAim(null, null, null); view.setCue(cue, game.aimDir, 0, false); return; }
   const hit = predictContact(cue, game.aimDir);
   view.setAim(cue, game.aimDir, hit);
-  const pull = game.charging ? 0.02 + game.power / MAX_POWER * 0.25 : 0.02;
+  const pull = 0.02 + game.power / MAX_POWER * 0.25;
   view.setCue(cue, game.aimDir, pull, game.phase === 'aiming');
 }
 
@@ -135,14 +142,20 @@ canvas.addEventListener('pointermove', e => {
     if (valid) { cue.x = pt.x; cue.z = pt.z; view.sync(world); }
     return;
   }
-  if (game.charging) return; // aim locks while charging
+  if (game.pulling) return; // aim locks while pulling back
 
   const dx = pt.x - cue.x, dz = pt.z - cue.z;
   const len = Math.hypot(dx, dz);
   if (len > 1e-3) game.aimDir = { x: dx / len, z: dz / len };
 });
 
+// Shooting: a click locks the aim, then pulling the mouse back (away from the
+// shot, along the cue) sets the power. It works two ways:
+//   - press, drag back, release to strike; or
+//   - click, move the mouse back, click again to strike.
+// A click with no pull, a right-click or Escape cancels and unlocks the aim.
 canvas.addEventListener('pointerdown', e => {
+  if (e.button === 2 && game.pulling) { cancelPull(); return; }
   if (e.button !== 0) return;             // left button only; right = orbit
   if (game.phase !== 'aiming' || currentIsAI()) return;
 
@@ -154,18 +167,64 @@ canvas.addEventListener('pointerdown', e => {
     }
     return;
   }
-  game.charging = true;
-  game.chargeStart = performance.now();
+
+  if (!game.pulling) { beginPull(e); return; }
+  // Second click of a click-pull-click shot.
+  if (game.power > MIN_POWER) strike(); else cancelPull();
+});
+
+window.addEventListener('pointermove', e => {
+  if (game.pulling) updatePull(e);
 });
 
 window.addEventListener('pointerup', e => {
-  if (e.button !== 0) return;
-  if (!game.charging) return;
-  game.charging = false;
-  if (game.power > 0.15) shoot();
+  if (e.button !== 0 || !game.pulling || !game.pullHeld) return;
+  game.pullHeld = false;
+  // Released after dragging back: strike. Released without a pull: it was a
+  // plain click, so stay in pull mode and wait for the second click.
+  if (game.power > MIN_POWER) strike();
+});
+
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && game.pulling) cancelPull();
+});
+
+function beginPull(e) {
+  // "Back" is wherever the cue stick points on screen from this camera angle.
+  const cue = world.cue();
+  const a = view.toScreen(cue.x, cue.z);
+  const b = view.toScreen(cue.x - game.aimDir.x * 0.1, cue.z - game.aimDir.z * 0.1);
+  const dx = b.x - a.x, dy = b.y - a.y;
+  const len = Math.hypot(dx, dy);
+  game.pullDir = len > 0.5 ? { x: dx / len, y: dy / len } : { x: 0, y: 1 };
+  game.pullStart = { x: e.clientX, y: e.clientY };
+  game.pulling = true;
+  game.pullHeld = true;
   game.power = 0;
   updatePowerBar();
-});
+}
+
+function updatePull(e) {
+  const d = (e.clientX - game.pullStart.x) * game.pullDir.x +
+            (e.clientY - game.pullStart.y) * game.pullDir.y;
+  game.power = Math.max(0, Math.min(1, d / pullRange())) * MAX_POWER;
+  updatePowerBar();
+}
+
+function cancelPull() {
+  game.pulling = false;
+  game.pullHeld = false;
+  game.power = 0;
+  updatePowerBar();
+}
+
+function strike() {
+  game.pulling = false;
+  game.pullHeld = false;
+  shoot();
+  game.power = 0;
+  updatePowerBar();
+}
 
 function shoot() {
   game.preGroupCleared = isGroupCleared(game.current);
@@ -453,13 +512,7 @@ function loop(now) {
     view.sync(world);
     if (!world.anyMoving()) resolveShot();
   } else if (game.phase === 'aiming') {
-    if (currentIsAI()) {
-      stepAI(now);
-    } else if (game.charging) {
-      const held = now - game.chargeStart;
-      game.power = Math.min(MAX_POWER, (held / CHARGE_TIME) * MAX_POWER);
-      updatePowerBar();
-    }
+    if (currentIsAI()) stepAI(now);
     updateAimVisuals();
   }
 
@@ -513,6 +566,8 @@ function newGame() {
   game.ballInHand = false;
   game.spin = { x: 0, y: 0 };
   game.power = 0;
+  game.pulling = false;
+  game.pullHeld = false;
   game.ai = { state: 'idle', shot: null, until: 0, chargeStart: 0 };
   rackBalls();
   drawSpin();
@@ -520,7 +575,7 @@ function newGame() {
   updateNames();
   updateScoreboard();
   const who = game.mode === 'ai' ? 'You break' : 'Player 1 to break';
-  flash(`${who}. Hold left mouse to power up!`, 3000);
+  flash(`${who}. Click, then pull the mouse back to set power!`, 3500);
 }
 
 newGame();
