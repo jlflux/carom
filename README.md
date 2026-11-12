@@ -50,9 +50,10 @@ It's standard **8-ball**:
   for fine aiming.
 - **View:** move the mouse forward or back to lower or raise the camera; the
   mouse wheel zooms.
-- **Shoot:** **click** to lock your aim, then **pull the mouse back** to set
-  power. Release to strike if you're holding the button, or click again if you
-  let go. Clicking without a pull, or right-clicking, cancels the shot.
+- **Shoot:** hold **Ctrl** to lock your aim and take hold of the cue. Pull the
+  mouse back to draw the cue back, then push it forward. The shot is struck
+  when the tip reaches the ball, and **how fast you push** sets how hard it's
+  hit. Letting go of Ctrl before then cancels the shot.
 - **Spin (english):** arrow keys, or click inside the spin circle (bottom-left),
   set where the cue tip strikes the ball — top/bottom for follow/draw, sides
   for english.

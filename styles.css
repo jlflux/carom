@@ -82,6 +82,7 @@ html, body {
   backdrop-filter: blur(8px);
   box-shadow: 0 6px 24px rgba(0,0,0,0.45);
 }
+.label .sub { opacity: 0.6; text-transform: none; letter-spacing: 0; }
 .label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 6px; }
 
 #spin { background: transparent; cursor: pointer; }

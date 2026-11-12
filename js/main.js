@@ -24,19 +24,28 @@ const game = {
   ballInHand: false,
   aimDir: { x: 1, z: 0 },
   spin: { x: 0, y: 0 },     // english tip offset, within unit circle
-  power: 0,
-  pulling: false,           // aim is locked and the mouse is setting power
-  pullHeld: false,          // the button that started the pull is still down
-  pullDist: 0,              // how far back the mouse has been pulled (px)
+  power: 0,                 // speed of the last/current shot (shown on the bar)
+  stroking: false,          // Ctrl is held: aim is locked, the mouse moves the cue
+  pullDist: 0,              // how far back the cue has been drawn (px of mouse travel)
+  armed: false,             // drawn back far enough that a push can strike
+  push: [],                 // recent forward mouse movement: [{ t, d }]
+  cuePull: 0,               // 0..1, how far back the cue stick is drawn on screen
   mode: 'ai',              // 'ai' (vs computer) | 'pvp' (two players)
   difficulty: 'Medium',
   ai: { state: 'idle', shot: null, until: 0, chargeStart: 0 },
 };
 
-const MAX_POWER = 6.0;       // m/s at a full pull
-const MIN_POWER = 0.2;       // pulls weaker than this don't count as a shot
+const MAX_POWER = 6.0;       // m/s, the hardest shot
+const MIN_POWER = 0.25;      // m/s, the softest tap
 
-// How far (in screen pixels) the mouse must be pulled back for full power.
+// The shot's power comes from how fast the mouse is pushed forward when the
+// cue tip reaches the ball. A push at FULL_PUSH pixels/second is a full-power
+// shot; slower pushes scale down from there.
+const FULL_PUSH = 3000;
+const PUSH_WINDOW = 80;      // ms of movement before contact used to measure it
+const ARM_DIST = 12;         // px the cue must be drawn back before it can strike
+
+// How far (in pixels of mouse travel) the cue can be drawn back.
 function pullRange() {
   return Math.max(120, Math.min(260, window.innerHeight * 0.3));
 }
@@ -115,7 +124,7 @@ function updateAimVisuals() {
   if (!cue || !cue.active) { view.setAim(null, null, null); view.setCue(cue, game.aimDir, 0, false); return; }
   const hit = predictContact(cue, game.aimDir);
   view.setAim(cue, game.aimDir, hit);
-  const pull = 0.02 + game.power / MAX_POWER * 0.25;
+  const pull = 0.02 + game.cuePull * 0.25;
   view.setCue(cue, game.aimDir, pull, game.phase === 'aiming');
 }
 
@@ -178,13 +187,13 @@ function releaseMouse() {
 }
 document.addEventListener('pointerlockerror', () => { lockFailed = true; });
 document.addEventListener('pointerlockchange', () => {
-  if (!isLocked() && game.pulling) cancelPull();
+  if (!isLocked()) cancelStroke();
 });
 
 canvas.addEventListener('contextmenu', e => e.preventDefault());
 
-// Mouse movement: turn the aim (and the camera with it), or set the power
-// while a shot is being pulled back.
+// Mouse movement: turn the aim (and the camera with it), or move the cue
+// back and forth while Ctrl is held.
 window.addEventListener('pointermove', e => {
   const dx = clamp(e.movementX || 0, -150, 150);
   const dy = clamp(e.movementY || 0, -150, 150);
@@ -192,13 +201,9 @@ window.addEventListener('pointermove', e => {
 
   if (mode === 'aim') {
     const overTable = e.target === canvas;
-    if (!isLocked() && !(lockFailed && (overTable || game.pulling))) return;
-    if (game.pulling) {
-      // The camera is behind the cue, so pulling the mouse back (toward you)
-      // draws the cue back.
-      game.pullDist = clamp(game.pullDist + dy, 0, pullRange());
-      game.power = game.pullDist / pullRange() * MAX_POWER;
-      updatePowerBar();
+    if (!isLocked() && !(lockFailed && (overTable || game.stroking))) return;
+    if (game.stroking) {
+      strokeMove(dy, e.timeStamp);
     } else {
       const sens = AIM_SENS * (e.shiftKey ? FINE_AIM : 1);
       const a = Math.atan2(game.aimDir.z, game.aimDir.x) + dx * sens;
@@ -236,13 +241,9 @@ canvas.addEventListener('wheel', e => {
   else cam.ovDist = clamp(cam.ovDist * f, 1.2, 5);
 }, { passive: false });
 
-// Shooting: a click locks the aim, then pulling the mouse back sets the power.
-// It works two ways:
-//   - press, pull back, release to strike; or
-//   - click, pull back, click again to strike.
-// A click with no pull or a right-click cancels and unlocks the aim.
+// Clicking the table takes the cue (captures the mouse), or places the cue
+// ball when you have ball in hand.
 canvas.addEventListener('pointerdown', e => {
-  if (e.button === 2 && game.pulling) { cancelPull(); return; }
   if (e.button !== 0) return;
   if (game.phase !== 'aiming' || currentIsAI()) return;
 
@@ -255,22 +256,28 @@ canvas.addEventListener('pointerdown', e => {
     }
     return;
   }
-
-  // The first click on the table just captures the mouse for aiming.
-  if (!steering()) { captureMouse(); return; }
-
-  if (!game.pulling) { beginPull(); return; }
-  // Second click of a click-pull-click shot.
-  if (game.power > MIN_POWER) strike(); else cancelPull();
+  captureMouse();
 });
 
-window.addEventListener('pointerup', e => {
-  if (e.button !== 0 || !game.pulling || !game.pullHeld) return;
-  game.pullHeld = false;
-  // Released after pulling back: strike. Released without a pull: it was a
-  // plain click, so stay in pull mode and wait for the second click.
-  if (game.power > MIN_POWER) strike();
+// Shooting: hold Ctrl to lock the aim and take hold of the cue. Pull the mouse
+// back to draw the cue back, then push it forward: the shot is struck when the
+// tip reaches the ball, as hard as you were pushing. Letting go of Ctrl before
+// the tip reaches the ball cancels the shot.
+window.addEventListener('keydown', e => {
+  if (e.key !== 'Control' || e.repeat) return;
+  if (cameraMode() !== 'aim' || !steering() || game.stroking) return;
+  game.stroking = true;
+  game.pullDist = 0;
+  game.armed = false;
+  game.push = [];
+  game.cuePull = 0;
+  game.power = 0;
+  updatePowerBar();
 });
+window.addEventListener('keyup', e => {
+  if (e.key === 'Control') cancelStroke();
+});
+window.addEventListener('blur', () => cancelStroke());
 
 // Arrow keys move the cue tip (spin) so it can be set without freeing the mouse.
 window.addEventListener('keydown', e => {
@@ -284,27 +291,53 @@ window.addEventListener('keydown', e => {
   drawSpin();
 });
 
-function beginPull() {
-  game.pulling = true;
-  game.pullHeld = true;
+// The camera is behind the cue, so mouse-back (toward you) draws the cue back
+// and mouse-forward pushes it at the ball.
+function strokeMove(dy, t) {
+  const range = pullRange();
+  if (dy >= 0) {
+    game.push = [];                       // drawing back: any push is over
+  } else {
+    game.push.push({ t, d: -dy });
+  }
+  const reached = game.pullDist + dy <= 0;
+  game.pullDist = clamp(game.pullDist + dy, 0, range);
+  game.cuePull = game.pullDist / range;
+  if (game.pullDist >= ARM_DIST) game.armed = true;
+
+  if (reached && game.armed) strike(pushSpeed(t));
+}
+
+// How fast the mouse was moving forward as the tip arrived, in pixels/second,
+// averaged over the last few moments so one jittery sample doesn't decide it.
+function pushSpeed(now) {
+  const recent = game.push.filter(m => now - m.t <= PUSH_WINDOW);
+  if (!recent.length) return 0;
+  const dist = recent.reduce((sum, m) => sum + m.d, 0);
+  // Each sample covers the time since the one before it; allow one typical
+  // mouse interval for the first so a single sample still gives a speed.
+  const span = Math.max(now - recent[0].t + 8, 16);
+  return dist / span * 1000;
+}
+
+function cancelStroke() {
+  if (!game.stroking) return;
+  game.stroking = false;
+  game.armed = false;
   game.pullDist = 0;
-  game.power = 0;
-  updatePowerBar();
+  game.cuePull = 0;
+  game.push = [];
 }
 
-function cancelPull() {
-  game.pulling = false;
-  game.pullHeld = false;
-  game.power = 0;
-  updatePowerBar();
-}
-
-function strike() {
-  game.pulling = false;
-  game.pullHeld = false;
+function strike(speed) {
+  game.stroking = false;
+  game.armed = false;
+  game.pullDist = 0;
+  game.cuePull = 0;
+  game.push = [];
+  game.power = clamp(speed / FULL_PUSH * MAX_POWER, MIN_POWER, MAX_POWER);
+  updatePowerBar();                        // stays up so you can see what you hit
   shoot();
-  game.power = 0;
-  updatePowerBar();
 }
 
 function shoot() {
@@ -513,8 +546,6 @@ function respotBall(id) {
 }
 
 function startAim() {
-  game.power = 0;
-  updatePowerBar();
   updateScoreboard();
   updateAimVisuals();
   maybeStartAI();
@@ -571,12 +602,12 @@ function stepAI(now) {
   } else if (ai.state === 'charge') {
     const f = Math.min(1, (now - ai.chargeStart) / AI_CHARGE_MS);
     game.power = ai.shot.power * f;
+    game.cuePull = game.power / MAX_POWER;
     updatePowerBar();
     if (f >= 1) {
       ai.state = 'idle';
+      game.cuePull = 0;
       shoot();
-      game.power = 0;
-      updatePowerBar();
     }
   }
 }
@@ -650,8 +681,10 @@ function newGame() {
   game.ballInHand = false;
   game.spin = { x: 0, y: 0 };
   game.power = 0;
-  game.pulling = false;
-  game.pullHeld = false;
+  game.stroking = false;
+  game.armed = false;
+  game.pullDist = 0;
+  game.cuePull = 0;
   game.ai = { state: 'idle', shot: null, until: 0, chargeStart: 0 };
   rackBalls();
   drawSpin();
@@ -659,7 +692,7 @@ function newGame() {
   updateNames();
   updateScoreboard();
   const who = game.mode === 'ai' ? 'You break' : 'Player 1 to break';
-  flash(`${who}. Move the mouse to aim, click and pull back to shoot.`, 3500);
+  flash(`${who}. Move the mouse to aim. Hold Ctrl, pull back, then push to shoot.`, 3500);
 }
 
 newGame();
